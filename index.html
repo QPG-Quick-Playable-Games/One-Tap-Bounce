@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>One-Button Glide</title>
+<style>
+  :root{
+    --bg1:#0f1724; --bg2:#071029; --card: rgba(255,255,255,0.06);
+    --accent:#7c5cff; --muted:rgba(255,255,255,0.6);
+    --glass: rgba(255,255,255,0.04);
+    --glass-2: rgba(255,255,255,0.02);
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%; margin:0; font-family:Inter,ui-sans-serif,system-ui,Segoe UI,Roboto,"Helvetica Neue",Arial}
+  body{
+    display:flex; align-items:center; justify-content:center;
+    background:linear-gradient(180deg,var(--bg1),var(--bg2));
+    color:#e6eef8;
+    -webkit-font-smoothing:antialiased;
+    -moz-osx-font-smoothing:grayscale;
+  }
+  .wrap{
+    width:min(720px,94vw);
+    padding:28px;
+    border-radius:14px;
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+    box-shadow: 0 10px 30px rgba(2,6,23,0.6), inset 0 1px 0 rgba(255,255,255,0.02);
+    display:grid; gap:16px;
+  }
+  header{
+    display:flex; align-items:center; justify-content:space-between; gap:12px;
+  }
+  h1{font-size:18px;margin:0;letter-spacing:0.4px}
+  .scoreboard{
+    display:flex; gap:10px; align-items:center;
+  }
+  .stat{
+    background:var(--glass); padding:8px 12px; border-radius:10px; font-weight:600; color:var(--muted);
+    display:flex; flex-direction:column; align-items:flex-end;
+  }
+  .stat .big{font-size:20px; color:#fff}
+  canvas{
+    width:100%; height:420px; border-radius:10px; display:block; background:
+    linear-gradient(180deg, rgba(255,255,255,0.01), rgba(0,0,0,0.03));
+    box-shadow: inset 0 -30px 60px rgba(0,0,0,0.3);
+    cursor: pointer;
+  }
+  .controls{
+    display:flex; gap:10px; align-items:center; justify-content:space-between;
+  }
+  button{
+    -webkit-tap-highlight-color:transparent;
+    background:linear-gradient(180deg,var(--accent), #5b3bff);
+    color:white; border:0; padding:10px 14px; border-radius:10px; font-weight:700;
+    box-shadow: 0 6px 18px rgba(124,92,255,0.28); cursor:pointer;
+  }
+  .hint{color:var(--muted); font-size:13px}
+  .overlay{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    pointer-events:none;
+  }
+  .panel{
+    pointer-events:auto;
+    background:linear-gradient(180deg,var(--glass),var(--glass-2));
+    padding:18px; border-radius:12px; text-align:center; backdrop-filter: blur(6px);
+    box-shadow: 0 8px 24px rgba(2,6,23,0.6);
+  }
+  .panel h2{margin:0 0 8px 0}
+  .small{font-size:13px; color:var(--muted)}
+  footer{display:flex; justify-content:center; color:var(--muted); font-size:12px; padding-top:6px}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>One-Button Glide</h1>
+      <div class="scoreboard">
+        <div class="stat" id="scoreBox"><div class="small">Score</div><div class="big" id="score">0</div></div>
+        <div class="stat"><div class="small">Best</div><div class="big" id="best">0</div></div>
+      </div>
+    </header>
+
+    <div style="position:relative;">
+      <canvas id="game" tabindex="0" aria-label="Game canvas"></canvas>
+
+      <div class="overlay" id="overlay">
+        <div class="panel" id="panel">
+          <h2 id="panelTitle">Tap / Click / Space to play</h2>
+          <div class="small" id="panelText">Hold the button rhythm to glide through gaps. Easy to learn, hard to master.</div>
+          <div style="height:8px"></div>
+          <button id="startBtn">Start</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <div class="hint">One button: click or press space — tap to flap</div>
+      <div>
+        <button id="restart" style="background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted);box-shadow:none">Restart</button>
+      </div>
+    </div>
+
+    <footer>Designed for quick reflexes • Built with HTML/CSS/JS</footer>
+  </div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const overlay = document.getElementById('overlay');
+  const panelTitle = document.getElementById('panelTitle');
+  const panelText = document.getElementById('panelText');
+  const startBtn = document.getElementById('startBtn');
+  const restartBtn = document.getElementById('restart');
+  const scoreEl = document.getElementById('score');
+  const bestEl = document.getElementById('best');
+
+  let W, H, DPR=window.devicePixelRatio||1;
+  function resize(){
+    const rect = canvas.getBoundingClientRect();
+    W = Math.floor(rect.width);
+    H = Math.floor(rect.height);
+    canvas.width = W * DPR;
+    canvas.height = H * DPR;
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+  }
+  window.addEventListener('resize', resize, {passive:true});
+  // Game vars
+  const player = {x:120, y:200, r:14, vy:0};
+  const gravity = 0.6, flapPower = -10;
+  let pipes = [], frame=0, score=0, best=+localStorage.getItem('ob_best')||0;
+  let running=false, gameOver=false, spawnInterval=90, speed=2.6;
+
+  bestEl.textContent = best;
+
+  function reset(){
+    pipes = [];
+    frame = 0;
+    score = 0;
+    scoreEl.textContent = score;
+    player.y = H/2;
+    player.vy = 0;
+    running = false;
+    gameOver = false;
+    spawnInterval = 90;
+    speed = 2.6;
+    panelTitle.textContent = 'Tap / Click / Space to play';
+    panelText.textContent = 'Hold the button rhythm to glide through gaps.';
+    overlay.style.pointerEvents = 'auto';
+    overlay.style.display = 'flex';
+  }
+
+  function startGame(){
+    if (running) return;
+    running = true;
+    overlay.style.pointerEvents = 'none';
+    overlay.style.display = 'none';
+    panelTitle.textContent = 'Go!';
+  }
+
+  function spawnPipe(){
+    const gap = Math.max(110, 170 - Math.floor(score/6));
+    const topH = 60 + Math.random() * (H - gap - 160);
+    pipes.push({x: W + 40, w: 72, top: topH, gap, passed: false});
+  }
+
+  function flap(){
+    if (gameOver) return;
+    player.vy = flapPower;
+    startGame();
+  }
+
+  function update(){
+    if (!running) return;
+    frame++;
+    // spawn
+    if (frame % Math.max(20, spawnInterval - Math.floor(score/8)) === 0) spawnPipe();
+    // update pipes
+    for (let p of pipes) p.x -= speed + Math.min(score*0.02, 2);
+    // remove offscreen
+    pipes = pipes.filter(p => p.x + p.w > -50);
+    // physics
+    player.vy += gravity;
+    player.y += player.vy;
+    // collision with floor/ceiling
+    if (player.y + player.r > H) { player.y = H - player.r; lose(); }
+    if (player.y - player.r < 0) { player.y = player.r; player.vy = 0; }
+
+    // check pipes collisions and scoring
+    for (let p of pipes){
+      // scoring
+      if (!p.passed && p.x + p.w < player.x){
+        p.passed = true; score++; scoreEl.textContent = score;
+        if (score > best){ best = score; bestEl.textContent = best; localStorage.setItem('ob_best', best); }
+      }
+      // collision: check circle vs rect top and bottom
+      const inX = player.x + player.r > p.x && player.x - player.r < p.x + p.w;
+      if (inX){
+        if (player.y - player.r < p.top || player.y + player.r > p.top + p.gap){
+          lose(); break;
+        }
+      }
+    }
+    // speed difficulty scaling
+    speed = 2.6 + Math.min(score * 0.05, 2.4);
+  }
+
+  function lose(){
+    running = false;
+    gameOver = true;
+    overlay.style.pointerEvents = 'auto';
+    overlay.style.display = 'flex';
+    panelTitle.textContent = 'Game Over';
+    panelText.textContent = `Score: ${score} — Best: ${best}`;
+    startBtn.textContent = 'Play Again';
+  }
+
+  function draw(){
+    // clear
+    ctx.clearRect(0,0,W,H);
+    // background subtle
+    const g = ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0, 'rgba(124,92,255,0.06)');
+    g.addColorStop(1, 'rgba(0,0,0,0.02)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0,0,W,H);
+
+    // draw pipes
+    for (let p of pipes){
+      // body
+      ctx.fillStyle = '#0ea5a7';
+      roundRect(ctx, p.x, 0, p.w, p.top, 10);
+      roundRect(ctx, p.x, p.top + p.gap, p.w, H - (p.top + p.gap), 10);
+      // inner gradient
+      const glow = ctx.createLinearGradient(p.x,0,p.x+p.w,0);
+      glow.addColorStop(0,'rgba(255,255,255,0.06)');
+      glow.addColorStop(1,'rgba(0,0,0,0.06)');
+      ctx.fillStyle = glow;
+      ctx.globalAlpha = 0.08;
+      ctx.fillRect(p.x, 0, p.w, p.top);
+      ctx.fillRect(p.x, p.top + p.gap, p.w, H - (p.top + p.gap));
+      ctx.globalAlpha = 1;
+    }
+
+    // player (circle with gradient)
+    const pg = ctx.createRadialGradient(player.x - 6, player.y - 6, 6, player.x, player.y, player.r+6);
+    pg.addColorStop(0, '#fff');
+    pg.addColorStop(0.15, '#ffd6a5');
+    pg.addColorStop(1, '#ff8fab');
+    ctx.fillStyle = pg;
+    ctx.beginPath();
+    ctx.arc(player.x, player.y, player.r, 0, Math.PI*2);
+    ctx.fill();
+
+    // wing/trail
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    for (let i=0;i<4;i++){
+      ctx.beginPath();
+      ctx.ellipse(player.x - 10 - i*6, player.y + player.vy*0.8 + i*3, 6 - i, 4 - i*0.6, Math.PI/6, 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    // HUD subtle
+    ctx.fillStyle = 'rgba(255,255,255,0.02)';
+    ctx.fillRect(0,H-36,W,36);
+  }
+
+  function roundRect(ctx,x,y,w,h,r){
+    const rad = Math.min(r, w/2, h/2);
+    ctx.beginPath();
+    ctx.moveTo(x+rad,y);
+    ctx.arcTo(x+w,y,x+w,y+h,rad);
+    ctx.arcTo(x+w,y+h,x,y+h,rad);
+    ctx.arcTo(x,y+h,x,y,rad);
+    ctx.arcTo(x,y,x+w,y,rad);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function loop(){
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // Input
+  canvas.addEventListener('pointerdown', e => { e.preventDefault(); flap(); });
+  window.addEventListener('keydown', e => {
+    if (e.code === 'Space') { e.preventDefault(); flap(); }
+    if (e.key === 'r' || e.key === 'R') restart();
+  });
+
+  startBtn.addEventListener('click', () => {
+    if (gameOver) {
+      restart();
+      startGame();
+    } else startGame();
+  });
+
+  restartBtn.addEventListener('click', restart);
+
+  function restart(){
+    reset();
+    startBtn.textContent = 'Start';
+  }
+
+  // initial setup
+  function init(){
+    resize();
+    reset();
+    // seed a couple pipes for visual
+    pipes = [];
+    requestAnimationFrame(loop);
+  }
+
+  // ensure canvas gets focus for keyboard on click
+  canvas.addEventListener('click', () => canvas.focus());
+
+  // expose for small touch-and-hold auto-flap (optional)
+  let holding = false;
+  canvas.addEventListener('pointerdown', (e) => { holding = true; });
+  window.addEventListener('pointerup', ()=> holding = false);
+
+  // slight auto-flap while holding (makes control more nuanced)
+  setInterval(()=>{
+    if (holding && running && !gameOver){
+      // gentle flaps to allow hovering with skill
+      player.vy += -1.8;
+    }
+  }, 140);
+
+  init();
+})();
+</script>
+</body>
+</html>
